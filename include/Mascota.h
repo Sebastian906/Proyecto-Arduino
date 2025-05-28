@@ -21,7 +21,7 @@ private:
     static const unsigned int MAX_GRAMOS = 10;
     
     // Tamaño de datos por mascota en EEPROM (nombre + rfid + tiempo + gramos + total)
-    static const int TAMAÑO_DATOS_MASCOTA = 64; 
+    static const int TAMANO_DATOS_MASCOTA = 64; 
 
 public:
     // Constructor

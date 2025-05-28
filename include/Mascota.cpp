@@ -113,7 +113,7 @@ unsigned long Mascota::getTiempoRestante() const {
 void Mascota::guardarEnEEPROM() {
     if (idEEPROM < 0) return;
     
-    int direccion = idEEPROM * TAMAÑO_DATOS_MASCOTA;
+    int direccion = idEEPROM * TAMANO_DATOS_MASCOTA;
     
     // Guardar nombre (máximo 16 caracteres)
     for (int i = 0; i < 16; i++) {
@@ -152,7 +152,7 @@ void Mascota::guardarEnEEPROM() {
 void Mascota::cargarDeEEPROM() {
     if (idEEPROM < 0) return;
     
-    int direccion = idEEPROM * TAMAÑO_DATOS_MASCOTA;
+    int direccion = idEEPROM * TAMANO_DATOS_MASCOTA;
     
     // Cargar nombre
     nombre = "";
