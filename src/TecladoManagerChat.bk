@@ -1,0 +1,63 @@
+// TecladoManager.cpp
+
+class TecladoManager {
+public:
+  void actualizar() {
+    char tecla = teclado.getKey();
+
+    if (tecla) {
+      if (tecla == '*') {
+        modoMenu = true;  // Activamos modo menú
+        mostrarMenu();
+      } else {
+        Serial.print("Tecla presionada: ");
+        Serial.println(tecla);
+      }
+    }
+  }
+
+  void mostrarMenu() {
+    LcdManager.limpiarDisplay();
+    LcdManager.escribirNormal("#Historial");
+    LcdManager.escribirSegundaLinea("+CambiarValores");
+
+    Serial.println("\n[Menú Activado]");
+    Serial.println("#Historial    +CambiarValores");
+  }
+};
+
+
+
+// ControlAlimentacion.h 
+
+void dispensar() {
+    if (modoMenu) {
+        // Si estamos en modo menú, no dispensamos
+        return;
+    }
+
+    unsigned long ahora = millis();
+    if (ahora - ultimoTiempoDispensacion >= intervalo) {
+        ultimoTiempoDispensacion = ahora;
+
+        for (int i = 0; i < cantidadMascotas; i++) {
+            Mascota *m = mascotas[i];
+
+            if (m->esTiempoDeDosis()) {
+                int gramos = m->dispensarDosis();
+                Serial.println("Dispensando comida para " + String(gramos));
+                ledManager.parpadear(m->getCuenco());
+                guardarEnVisualizacion("G"+String(i + 1), gramos, 'D', i);
+                m->inicioDispensacion++;
+            } else {
+                m->inicioDispensacion = 0;
+                int tiempoRestante = m->getTiempoAnteDosis();
+                guardarEnVisualizacion("G"+String(i + 1), tiempoRestante, 'T', i);
+            }
+        }
+
+        LcdManager.escribirDisplay(listaVisualizacion);
+        mostrarHistorial();
+    }
+}
+

@@ -4,8 +4,8 @@
 
 class LEDManager {
   public:
-    LEDManager(int pin);
-    void parpadear(int gramos);
+    LEDManager();
+    void parpadear(int cuenco);
   private:
     int ledPin;
 };

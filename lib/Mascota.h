@@ -2,31 +2,34 @@
 #define MASCOTA_H
 
 #include <Arduino.h>
-#include <EEPROM.h>
+#include <EEPROMManager.h>
 
 class Mascota {
 private:
     String nombre;
     String rfidUID;
-    unsigned int tiempoEntreDosis;    // En segundos (10-30)
-    unsigned int cantidadGramos;      // En gramos (1-10)
-    int idEEPROM;                     // Posición base en EEPROM para esta mascota
-    unsigned long tiempoUltimaDosis;  // Timestamp de la última dosis
-    unsigned int totalAlimentoConsumido; // Total acumulado de alimento
 
-    // Constantes para validación
-    static const unsigned int MIN_TIEMPO = 10;
-    static const unsigned int MAX_TIEMPO = 30;
-    static const unsigned int MIN_GRAMOS = 1;
-    static const unsigned int MAX_GRAMOS = 10;
-    
-    // Tamaño de datos por mascota en EEPROM (nombre + rfid + tiempo + gramos + total)
-    static const int TAMANO_DATOS_MASCOTA = 64; 
+    int idEEPROM;                     // Posición base en EEPROM para esta mascota
+    unsigned int totalAlimentoConsumido; // Total acumulado de alimento
+    unsigned int Cuenco;
+    bool CuencoEstado;
+
+    //Objeto
+    EEPROMManager EEPROM;
+
+
 
 public:
+    unsigned int tiempoEntreDosis;    // En segundos (10-30)
+    unsigned int tiempoEntreDosisActual;    // En segundos (10-30)
+    unsigned int inicioDispensacion = 0;
+    unsigned int cantidadGramos;      // En gramos (1-10)
+    unsigned int cantidadGramosActual;      // En gramos (1-10)
+    bool isDosis;
+
     // Constructor
     Mascota();
-    Mascota(String nombre, String rfidUID, int idEEPROM);
+    Mascota(String nombre, String rfidUID, int cuenco);
     
     // Métodos para configurar parámetros
     bool setTiempo(unsigned int tiempo);
@@ -38,6 +41,7 @@ public:
     // Getters
     String getNombre() const;
     String getRFID() const;
+    unsigned int getCuenco() const;
     unsigned int getTiempo() const;
     unsigned int getComida() const;
     int getIdEEPROM() const;
@@ -46,9 +50,8 @@ public:
     
     // Métodos de dosificación
     bool esTiempoDeDosis() const;
-    void dispensarDosis();
-    void actualizarTiempoUltimaDosis();
-    unsigned long getTiempoRestante() const;
+    int dispensarDosis();
+    unsigned int getTiempoAnteDosis();
     
     // Métodos de persistencia
     void guardarEnEEPROM();
