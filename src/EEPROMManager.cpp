@@ -1,6 +1,5 @@
 #include "EEPROMManager.h"
-
-
+#include "EEPROM.h"
 
 
 EEPROMManager::EEPROMManager() {
@@ -16,8 +15,8 @@ uint16_t EEPROMManager::guardarParametros(uint8_t tiempoEntreDosis, uint8_t cant
     uint16_t direccion;
 
     // Validar si la dirección pasada es válida
-    if (direccionExistente >= 0 && direccionExistente + 1 < EEPROM.length()) {
-        direccion = direccionExistente;
+    if (direccionExistente >= 0 && static_cast<uint16_t>(direccionExistente + 1) < static_cast<uint16_t>(EEPROM.length())) {
+        direccion = static_cast<uint16_t>(direccionExistente);
         Serial.println("Sobrescribiendo parámetros existentes...");
     } else {
         // Buscar una nueva dirección si la actual es inválida

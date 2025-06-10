@@ -6,10 +6,9 @@ LEDManager::LEDManager() {
 
 }
 
-void LEDManager::parpadear(int cuenco) {
+void LEDManager::parpadear(int cuenco, unsigned long tiempoMs) {
     pinMode(cuenco, OUTPUT);           // Configura el pin como salida
     digitalWrite(cuenco, HIGH);        // Enciende el LED del cuenco
-    delay(200);                        
+    delay(tiempoMs);                        
     digitalWrite(cuenco, LOW);         // Apaga el LED
-    delay(200);
 }

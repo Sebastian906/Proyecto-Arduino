@@ -5,7 +5,7 @@
 class LEDManager {
   public:
     LEDManager();
-    void parpadear(int cuenco);
+    void parpadear(int cuenco, unsigned long tiempoMs = 200);
   private:
     int ledPin;
 };

@@ -9,14 +9,12 @@
 #include "RFIDReader.h"
 #include "Teclado.h"
 
-class ControlAlimento
-{
+class ControlAlimento {
 public:
   static const int MAX_MASCOTAS = 10;
 
-  Mascota *mascotas[MAX_MASCOTAS];
+  Mascota* mascotas[MAX_MASCOTAS];
   int cantidadMascotas = 0;
-  bool presionadoMenu = false;
 
   LEDManager ledManager;
   LCD LcdManager;
@@ -25,197 +23,214 @@ public:
 
   VisualizacionMascota listaVisualizacion[MAX_MASCOTAS];
 
-  // Control de tiempo para dispensar cada minuto
   unsigned long ultimoTiempoDispensacion = 0;
-  const unsigned long intervalo = 1000; // 1 segundo
+  unsigned long ultimoTiempoRFID = 0;
+  const unsigned long intervaloDispensacion = 1000;
+  const unsigned long intervaloRFID = 200;
 
   ControlAlimento() : ledManager(), LcdManager(), RFIDLector(9, 8), teclado() {}
 
-  void identificarGatoPorRFID()
-  {
-    LcdManager.limpiarDisplay();
-    LcdManager.escribirNormal("Esperando Gato...");
-    String uid = RFIDLector.leerRFID2();
-    if (uid == "")
-    {
-      LcdManager.limpiarDisplay();
-      LcdManager.escribirNormal("No se detectó RFID");
-    }
-    else
-    {
-      for (int i = 0; i < cantidadMascotas; i++)
-      {
-        if (mascotas[i]->coincideRFID(uid))
-        {
-          LcdManager.limpiarDisplay();
-          LcdManager.escribirNormal("Gato identificado: " + mascotas[i]->getNombre());
-        }
-      }
-      Serial.println("Gato no encontrado.");
-    }
-  }
-
-  void iniciar()
-  {
+  void iniciar() {
+    RFIDLector.begin();
     mascotas[0] = new Mascota("Firulais", "UID12345", 7);
     mascotas[1] = new Mascota("Rafita", "9C A7 C0 01", 6);
-    Serial.println("[" + mascotas[1]->getRFID() + "]");
     mascotas[1]->setTiempo(8);
     cantidadMascotas = 2;
+
+    Serial.println("Sistema de alimentación iniciado");
+    LcdManager.limpiarDisplay();
+    LcdManager.escribirNormal("Sistema Listo");
   }
 
-  void dispensar()
-  {
-    if (teclado.obtenerTecla() == '*')
-    {
-      MenuPrincipal();
-    }
-    unsigned long ahora = millis();
-    if (ahora - ultimoTiempoDispensacion >= intervalo)
-    {
-      ultimoTiempoDispensacion = ahora;
+  void verificarRFID() {
+    if (millis() - ultimoTiempoRFID < intervaloRFID) return;
+    ultimoTiempoRFID = millis();
 
-      for (int i = 0; i < cantidadMascotas; i++)
-      {
-        if (teclado.obtenerTecla() == '*')
-        {
-          MenuPrincipal();
+    String uid = RFIDLector.leerRFIDNoBloqueante();
+    if (uid != "") {
+      Mascota* mascota = buscarMascotaPorRFID(uid);
+      if (mascota != nullptr) {
+        mascota->marcarPresencia();
+        Serial.println("Gato detectado: " + mascota->getNombre());
+
+        if (mascota->cuencoLleno()) {
+          LcdManager.limpiarDisplay();
+          LcdManager.escribirNormal("Acceso permitido");
+          ledManager.parpadear(mascota->getCuenco(), 5000);
+          mascota->setCuencoLleno(false);
+        } else {
+          LcdManager.limpiarDisplay();
+          LcdManager.escribirNormal("Aun no es tiempo");
         }
-        Mascota *m = mascotas[i];
+      } else {
+        Serial.println("RFID no reconocido: " + uid);
+        LcdManager.limpiarDisplay();
+        LcdManager.escribirNormal("Gato no registrado");
+      }
+    } else {
+      verificarPresenciaMascotas();
+    }
+  }
 
-        if (m->esTiempoDeDosis())
-        {
-          int gramos = m->dispensarDosis();
-          Serial.println("Dispensando comida para " + String(gramos));
+  void dispensar() {
+    if (teclado.obtenerTecla() == '*') {
+      mostrarMenuPrincipal();
+      return;
+    }
+
+    if (millis() - ultimoTiempoDispensacion < intervaloDispensacion) return;
+    ultimoTiempoDispensacion = millis();
+
+    bool huboDispensacion = false;
+
+    for (int i = 0; i < cantidadMascotas; i++) {
+      Mascota* m = mascotas[i];
+      if (!m) continue;
+
+      if (m->estaGatoPresente() && (m->esTiempoDeDosis() || !m->getCuencoEstado())) {
+        int gramos = m->dispensarDosis();
+        if (gramos > 0) {
+          Serial.println("¡DISPENSANDO! Gato: " + m->getNombre() + ", Cantidad: " + String(gramos) + "g");
           ledManager.parpadear(m->getCuenco());
           guardarEnVisualizacion("G" + String(i + 1), gramos, 'D', i);
           m->inicioDispensacion++;
-          if (teclado.obtenerTecla() == '*')
-          {
-            MenuPrincipal();
-          }
+          LcdManager.limpiarDisplay();
+          LcdManager.escribirNormal("Dispensando: " + m->getNombre());
+          huboDispensacion = true;
         }
-        else
-        {
-          m->inicioDispensacion = 0;
-          int tiempoRestante = m->getTiempoAnteDosis();
-          guardarEnVisualizacion("G" + String(i + 1), tiempoRestante, 'T', i);
-          if (teclado.obtenerTecla() == '*')
-          {
-            MenuPrincipal();
-          }
-        }
+      } else {
+        m->inicioDispensacion = 0;
+        guardarEnVisualizacion("G" + String(i + 1),
+                               m->estaGatoPresente() ? m->getTiempoAnteDosis() : 0,
+                               m->estaGatoPresente() ? 'T' : 'A',
+                               i);
       }
 
+      if (teclado.obtenerTecla() == '*') {
+        mostrarMenuPrincipal();
+        return;
+      }
+    }
+
+    if (!huboDispensacion) {
       LcdManager.escribirDisplay(listaVisualizacion);
-      mostrarHistorial();
-      if (teclado.obtenerTecla() == '*')
-      {
-        MenuPrincipal();
+    }
+
+    mostrarHistorial();
+  }
+
+  void ejecutarCiclo() {
+    verificarRFID();
+    dispensar();
+  }
+
+  Mascota* buscarMascotaPorRFID(const String& uid) {
+    for (int i = 0; i < cantidadMascotas; i++) {
+      if (mascotas[i] && mascotas[i]->coincideRFID(uid)) {
+        return mascotas[i];
       }
     }
+    return nullptr;
   }
 
-  void guardarEnVisualizacion(String nombre, int numero, char estado, int i)
-  {
-    if (teclado.obtenerTecla() == '*')
-    {
-      MenuPrincipal();
+  void verificarPresenciaMascotas() {
+    for (int i = 0; i < cantidadMascotas; i++) {
+      if (mascotas[i]) mascotas[i]->marcarAusencia();
     }
-    listaVisualizacion[i].nombre = nombre;
-    listaVisualizacion[i].numero = numero;
-    listaVisualizacion[i].estado = estado;
   }
 
-  void mostrarHistorial()
-  {
-    Serial.println(F("----- Historial de Mascotas -----"));
-    Serial.println(F("RFID           | Nombre        | Total (g)"));
-    Serial.println(F("--------------------------------------------"));
+  void guardarEnVisualizacion(const String& nombre, int numero, char estado, int i) {
+    if (i >= 0 && i < MAX_MASCOTAS) {
+      listaVisualizacion[i] = { nombre, numero, estado };
+    }
+  }
 
-    for (int i = 0; i < cantidadMascotas; i++)
-    {
-      if (mascotas[i] != nullptr)
-      {
-        String rfid = mascotas[i]->getRFID();
+  void mostrarHistorial() {
+    Serial.println(F("----- Estado del Sistema -----"));
+    Serial.println(F("Gato           | Estado    | Info"));
+    Serial.println(F("------------------------------------"));
+
+    for (int i = 0; i < cantidadMascotas; i++) {
+      if (mascotas[i]) {
         String nombre = mascotas[i]->getNombre();
-        int total = mascotas[i]->getTotalAlimentoConsumido();
+        String estado = mascotas[i]->estaGatoPresente() ? "PRESENTE" : "AUSENTE";
+        String info = mascotas[i]->estaGatoPresente() ?
+                      "Próx: " + String(mascotas[i]->getTiempoAnteDosis()) + "s" :
+                      "Total: " + String(mascotas[i]->getTotalAlimentoConsumido()) + "g";
 
-        // Formato fijo para columnas
-        char buffer[50];
-        snprintf(buffer, sizeof(buffer), "%-14s | %-13s | %4d",
-                 rfid.c_str(), nombre.c_str(), total);
+        char buffer[64];
+        snprintf(buffer, sizeof(buffer), "%-13s | %-9s | %s",
+                 nombre.c_str(), estado.c_str(), info.c_str());
         Serial.println(buffer);
       }
     }
 
-    Serial.println(F("--------------------------------------------"));
+    Serial.println(F("------------------------------------"));
   }
 
-  void AntesMenu()
-  {
-  }
+  void identificarGatoPorRFID() {
+    LcdManager.limpiarDisplay();
+    LcdManager.escribirNormal("Esperando Gato...");
+    String uid = RFIDLector.leerRFIDNoBloqueante();
 
-  void MenuPrincipal()
-  {
-
-    MenuPrincipalLCD();
-
-    while (true)
-    {
-      char tecla = teclado.obtenerTecla();
-
-      if (tecla)
-      {
-        Serial.print("Tecla presionada: ");
-        Serial.println(tecla);
-
-        switch (tecla)
-        {
-        case '1':
-          mostrarHistorial();
-          return;
-        case '2':
-          Reset();
-          return;
-        case '3':
-          MenuGatos();
-          return;
-        case '4':
-          Serial.println("Salir...");
-          return;
-        default:
-          LcdManager.limpiarDisplay();
-          LcdManager.setCursor(0, 0);
-          LcdManager.escribirNormal("Opcion invalida");
-          delay(700);
-          MenuPrincipalLCD();
-          // Vuelve a mostrar el menú tras el error
-          break;
-        }
+    if (uid == "") {
+      LcdManager.limpiarDisplay();
+      LcdManager.escribirNormal("No se detectó RFID");
+    } else {
+      Mascota* mascota = buscarMascotaPorRFID(uid);
+      if (mascota) {
+        mascota->marcarPresencia();
+        LcdManager.limpiarDisplay();
+        LcdManager.escribirNormal("Gato identificado: " + mascota->getNombre());
+      } else {
+        Serial.println("Gato no encontrado.");
+        LcdManager.limpiarDisplay();
+        LcdManager.escribirNormal("Gato no registrado");
       }
     }
   }
 
+  // MENÚS
 
-  void Reset()
-  {
-    for (int i = 0; i < cantidadMascotas; i++)
-    {
-      if (mascotas[i] != nullptr)
-      {
-        mascotas[i]->resetearValoresPredeterminados();
+  void mostrarMenuPrincipal() {
+    mostrarMenuPrincipalLCD();
+    while (true) {
+      char tecla = teclado.obtenerTecla();
+      if (!tecla) continue;
+
+      switch (tecla) {
+        case '1':
+          mostrarHistorial();
+          return;
+        case '2':
+          resetearValores();
+          return;
+        case '3':
+          mostrarMenuGatos();
+          return;
+        case '4':
+          Serial.println("Saliendo del menú...");
+          return;
+        default:
+          LcdManager.limpiarDisplay();
+          LcdManager.escribirNormal("Opción inválida");
+          delay(700);
+          mostrarMenuPrincipalLCD();
+          break;
       }
+    }
+  }
+
+  void resetearValores() {
+    for (int i = 0; i < cantidadMascotas; i++) {
+      if (mascotas[i]) mascotas[i]->resetearValoresPredeterminados();
     }
     LcdManager.limpiarDisplay();
     LcdManager.escribirNormal("Valores reseteados");
     delay(500);
   }
 
-
-
-  void MenuPrincipalLCD()
-  {
+  void mostrarMenuPrincipalLCD() {
     LcdManager.limpiarDisplay();
     LcdManager.setCursor(0, 0);
     LcdManager.escribirNormal("1.His  3.C.Val");
@@ -223,159 +238,49 @@ public:
     LcdManager.escribirNormal("2.Rst  4.Ex");
   }
 
-  void MenuGatos()
-  {
-    MenuGatosLCD(cantidadMascotas);
-    // Bucle bloqueante para esperar a que el usuario seleccione un número 1-4
-    while (true)
-    {
+  void mostrarMenuGatos() {
+    mostrarMenuGatosLCD();
+    while (true) {
       char tecla = teclado.obtenerTecla();
-      if (!tecla)
-        continue;
+      if (!tecla) continue;
 
-      Serial.print("Gato seleccionado: ");
       int opcion = tecla - '0';
-      Serial.println(opcion);
-
-      if (opcion >= 1 && opcion <= cantidadMascotas)
-      {
-        // Aquí puedes acceder a la mascota con índice (opcion - 1)
-
-        MenuOpcionesGato(opcion - 1);
-      }
-      else
-      {
-        // Si la opción no es 1–4, mostramos “Opción inválida” brevemente
+      if (opcion >= 1 && opcion <= cantidadMascotas) {
+        mostrarMenuOpcionesGato(opcion - 1);
+        return;
+      } else {
         LcdManager.limpiarDisplay();
-        LcdManager.setCursor(0, 0);
-        LcdManager.escribirNormal("Opcion invalida");
+        LcdManager.escribirNormal("Opción inválida");
         delay(700);
-        // Redibujamos nuevamente la lista de gatos
-        LcdManager.limpiarDisplay();
-        MenuGatosLCD(cantidadMascotas);
-        break;
+        mostrarMenuGatosLCD();
       }
     }
   }
 
-  void MenuGatosLCD(int count)
-  {
-    // count = número de mascotas en la lista (puede ser 2, 3 ó 4)
-    // Limpiamos pantalla antes de dibujar
+  void mostrarMenuGatosLCD() {
     LcdManager.limpiarDisplay();
+    String linea1 = "", linea2 = "";
 
-    // Cadenas que vamos a imprimir en cada línea del LCD (16 cols × 2 filas)
-    String linea1 = "";
-    String linea2 = "";
-
-    // Construir línea 1: aquí van las mascotas índice 0 y 1 (si existen)
-    for (int i = 0; i < count && i < 2; i++)
-    {
-      // i = 0 → “1.<nombre>”
-      // i = 1 → “2.<nombre>”
-      String etiqueta = String(i + 1) + "." + listaVisualizacion[i].nombre;
-      if (i == 0)
-      {
-        linea1 += etiqueta;
-      }
-      else
-      {
-        // Para el segundo elemento de la primera línea, queremos que empiece
-        // aproximadamente en la columna 8. Calculamos cuántos espacios poner:
-        int espacios = 8 - linea1.length();
-        if (espacios < 1)
-          espacios = 1;
-        for (int s = 0; s < espacios; s++)
-          linea1 += " ";
-        linea1 += etiqueta;
-      }
+    for (int i = 0; i < cantidadMascotas; i++) {
+      if (i < 2)
+        linea1 += String(i + 1) + "." + mascotas[i]->getNombre().substring(0, 3) + " ";
+      else if (i < 4)
+        linea2 += String(i + 1) + "." + mascotas[i]->getNombre().substring(0, 3) + " ";
     }
 
-    // Construir línea 2: aquí van las mascotas índice 2 y 3 (si existen)
-    for (int i = 2; i < count && i < 4; i++)
-    {
-      // i = 2 → “3.<nombre>”
-      // i = 3 → “4.<nombre>”
-      String etiqueta = String(i + 1) + "." + listaVisualizacion[i].nombre;
-      if (i == 2)
-      {
-        linea2 += etiqueta;
-      }
-      else
-      {
-        // Para el segundo elemento de la segunda línea, idem columna 8
-        int espacios = 8 - linea2.length();
-        if (espacios < 1)
-          espacios = 1;
-        for (int s = 0; s < espacios; s++)
-          linea2 += " ";
-        linea2 += etiqueta;
-      }
-    }
-
-    // Ahora imprimimos ambas líneas en el LCD
     LcdManager.setCursor(0, 0);
     LcdManager.escribirNormal(linea1);
-
     LcdManager.setCursor(0, 1);
     LcdManager.escribirNormal(linea2);
   }
 
-  void MenuOpcionesGato(int index)
-  {
-    // Mostrar el submenú
+  void mostrarMenuOpcionesGato(int indice) {
     LcdManager.limpiarDisplay();
-    LcdManager.setCursor(0, 0);
-    LcdManager.escribirNormal("1.Temporiz 2.Com");
-    LcdManager.setCursor(0, 1);
-    LcdManager.escribirNormal("3.Salir");
-
-    while (true)
-    {
-      char tecla = teclado.obtenerTecla();
-      if (!tecla)
-        continue;
-
-      Serial.print("Opcion seleccionada: ");
-      Serial.println(tecla);
-
-      switch (tecla)
-      {
-      case '1':
-        Serial.print("Temporizador del gato ");
-        Serial.println(index + 1); 
-        int tiempo = teclado.leerTiempo();
-        Serial.println(tiempo);
-        mascotas[index]->setTiempo(tiempo);
-
-        return;
-
-      case '2':
-        Serial.print("Comida para el gato ");
-        Serial.println(index + 1);
-        int gramos = teclado.leerGramos();
-        Serial.println(gramos);
-        mascotas[index]->setComida(gramos);
-        return;
-
-      case '3':
-        Serial.println("Salir...");
-        return;
-
-      default:
-        LcdManager.limpiarDisplay();
-        LcdManager.setCursor(0, 0);
-        LcdManager.escribirNormal("Opcion invalida");
-        delay(700);
-        LcdManager.limpiarDisplay();
-        LcdManager.setCursor(0, 0);
-        LcdManager.escribirNormal("1.Temporiz 2.Com");
-        LcdManager.setCursor(0, 1);
-        LcdManager.escribirNormal("3.Salir");
-        break;
-      }
-    }
+    LcdManager.escribirNormal("Opciones gato...");
+    delay(1000);
+    // Aquí puedes expandir con submenús: cambiar dosis, ver consumo, etc.
   }
+
 };
 
 #endif // CONTROL_ALIMENTACION_H

@@ -1,36 +1,21 @@
 #include "Mascota.h"
 
 // Constructor por defecto
-Mascota::Mascota():EEPROM() {
-    nombre = "";
-    rfidUID = "";
-    tiempoEntreDosis = 5;  // Valor predeterminado
-    tiempoEntreDosisActual = -1; 
-    cantidadGramos = 5;     // Valor predeterminado
-    cantidadGramosActual = cantidadGramos +1;
-    idEEPROM = -1;
-    totalAlimentoConsumido = 0;
-    guardarEnEEPROM(); // Guarda los valores predeterminados en EEPROM
-    
-} 
-
+Mascota::Mascota() : EEPROM(), estaPresente(false), tiempoUltimaDeteccion(0), 
+                    totalAlimentoConsumido(0), CuencoEstado(false),
+                    tiempoEntreDosis(60), cantidadGramos(5), isDosis(false) {
+}
 
 // Constructor con parámetros
-Mascota::Mascota(String nombre, String rfidUID, int cuenco):EEPROM() {
-    this->nombre = nombre;
-    this->rfidUID = rfidUID;
-    this->idEEPROM = -1;
-    this->tiempoEntreDosis = 5;  // Valor predeterminado
-    this->cantidadGramos = 5;     // Valor predeterminado
-    this-> cantidadGramosActual = cantidadGramos +1;
-    this->totalAlimentoConsumido = 0;
-    this->Cuenco = cuenco;
-    guardarEnEEPROM(); // Guarda los valores predeterminados en EEPROM
+Mascota::Mascota(String nombre, String rfidUID, int cuenco) : 
+    nombre(nombre), rfidUID(rfidUID), Cuenco(cuenco), EEPROM(),
+    totalAlimentoConsumido(0), estaPresente(false), tiempoUltimaDeteccion(0),
+    CuencoEstado(false), tiempoEntreDosis(60), cantidadGramos(5), isDosis(false) {
 }
 
 // Método para establecer el tiempo entre dosis
 bool Mascota::setTiempo(unsigned int tiempo) {
-    if (tiempo >= 5 && tiempo <= 30) {
+    if (tiempo >= 10 && tiempo <= 300) { // 10 seg a 5 min
         tiempoEntreDosis = tiempo;
         return true;
     }
@@ -39,9 +24,8 @@ bool Mascota::setTiempo(unsigned int tiempo) {
 
 // Método para establecer la cantidad de comida
 bool Mascota::setComida(unsigned int gramos) {
-    if (gramos >= 1 && gramos <= 10) {
+    if (gramos >= 1 && gramos <= 20) {
         cantidadGramos = gramos;
-        cantidadGramosActual = cantidadGramos;
         return true;
     }
     return false;
@@ -69,6 +53,10 @@ String Mascota::getRFID() const {
     return rfidUID;
 }
 
+unsigned int Mascota::getCuenco() const {
+    return Cuenco;
+}
+
 unsigned int Mascota::getTiempo() const {
     return tiempoEntreDosis;
 }
@@ -81,47 +69,73 @@ int Mascota::getIdEEPROM() const {
     return idEEPROM;
 }
 
-unsigned int Mascota::getCuenco() const {
-    return Cuenco;
-}
-
-
 unsigned int Mascota::getTotalAlimentoConsumido() const {
     return totalAlimentoConsumido;
 }
 
+// Implementación de control de presencia RFID
+bool Mascota::estaGatoPresente() const {
+    // Verificar si el gato sigue presente (no ha pasado el timeout)
+    return estaPresente && (millis() - tiempoUltimaDeteccion < TIMEOUT_PRESENCIA);
+}
+
+void Mascota::marcarPresencia() {
+    estaPresente = true;
+    tiempoUltimaDeteccion = millis();
+}
+
+void Mascota::marcarAusencia() {
+    estaPresente = false;
+}
+
 // Verifica si es tiempo de dispensar una dosis
 bool Mascota::esTiempoDeDosis() const {
-    return isDosis;
+    static unsigned long ultimaRevision = 0;
+    unsigned long ahora = millis();
+    
+    // Solo revisar cada segundo para evitar cálculos excesivos
+    if (ahora - ultimaRevision < 1000) {
+        return false;
+    }
+    
+    // El gato DEBE estar presente para dispensar
+    if (!estaGatoPresente()) {
+        return false;
+    }
+    
+    // Verificar si ha pasado el tiempo entre dosis
+    if (inicioDispensacion == 0) {
+        return true; // Primera dosis cuando el gato esté presente
+    }
+    
+    // Para dosis subsecuentes, verificar tiempo
+    unsigned long tiempoTranscurrido = (ahora / 1000) % (tiempoEntreDosis);
+    return tiempoTranscurrido == 0;
 }
 
 // Dispensa una dosis y actualiza contadores
 int Mascota::dispensarDosis() {
-    Serial.println(String(cantidadGramosActual));
-        if(cantidadGramosActual == 1){
-            isDosis = false;
-            cantidadGramosActual = cantidadGramos;
-            incrementarAlimento(cantidadGramos);
-            CuencoEstado = true;
-            return 0;
-        }else{
-            cantidadGramosActual = cantidadGramosActual - 1;
-            return cantidadGramosActual;
-        }
-
+    if (!estaGatoPresente()) {
+        return 0; // No dispensar si no está presente
+    }
+    
+    incrementarAlimento(cantidadGramos);
+    isDosis = true;
+    setCuencoLleno(true); // Marcar cuenco como lleno
+    return cantidadGramos;
 }
+
 
 // Calcula el tiempo restante hasta la próxima dosis
 unsigned int Mascota::getTiempoAnteDosis() {
-        if(tiempoEntreDosisActual == tiempoEntreDosis){
-            isDosis = true;
-            tiempoEntreDosisActual = 0;
-            return tiempoEntreDosis;
-        }else{
-            return tiempoEntreDosisActual ++;
-        }
+    if (!estaGatoPresente()) {
+        return 9999; // Indicar que el gato no está presente
+    }
+    
+    unsigned long ahora = millis();
+    unsigned long segundosTranscurridos = (ahora / 1000) % tiempoEntreDosis;
+    return tiempoEntreDosis - segundosTranscurridos;
 }
-
 
 // Guarda los datos de la mascota en EEPROM
 void Mascota::guardarEnEEPROM() {
@@ -159,6 +173,10 @@ void Mascota::cargarDeEEPROM() {
     Serial.println(this->cantidadGramos);
 }
 
+bool Mascota::getCuencoEstado() const {
+    return CuencoEstado;
+}
+
 
 // Resetea a los valores predeterminados
 void Mascota::resetearValoresPredeterminados() {
@@ -167,17 +185,45 @@ void Mascota::resetearValoresPredeterminados() {
     this->totalAlimentoConsumido = 0;
 }
 
-// Verifica si el UID coincide con el de la mascota
+// Implementación de validación RFID
 bool Mascota::coincideRFID(String uid) const {
-    return rfidUID.equals(uid);
+    String rfidStored = rfidUID;
+    String rfidLeido = uid;
+    rfidStored.trim();
+    rfidLeido.trim();
+    rfidStored.toUpperCase();
+    rfidLeido.toUpperCase();
+    bool iguales = rfidStored.equals(rfidLeido);
+    if (!iguales) {
+        Serial.print("[DEBUG] RFID NO COINCIDE: almacenado=[");
+        Serial.print(rfidStored);
+        Serial.print("] leido=[");
+        Serial.print(rfidLeido);
+        Serial.println("]");
+    }
+    return iguales;
 }
 
-// Obtiene información del consumo de la mascota
+// Implementación de información de consumo
 String Mascota::getInfoConsumo() const {
-    return "Mascota: " + nombre + " - Alimento total: " + String(totalAlimentoConsumido) + "g";
+    return "Mascota: " + nombre + ", Total: " + String(totalAlimentoConsumido) + "g";
 }
 
-// Incrementa el contador de alimento total
+// Implementación para incrementar alimento
 void Mascota::incrementarAlimento(unsigned int gramos) {
     totalAlimentoConsumido += gramos;
+    guardarEnEEPROM(); // Persistir el cambio
+}
+
+// Implementación de getTiempoUltimaDosis (método faltante)
+unsigned long Mascota::getTiempoUltimaDosis() const {
+    return tiempoUltimaDeteccion;
+}
+
+bool Mascota::cuencoLleno() const {
+    return CuencoEstado;
+}
+
+void Mascota::setCuencoLleno(bool lleno) {
+    CuencoEstado = lleno;
 }
